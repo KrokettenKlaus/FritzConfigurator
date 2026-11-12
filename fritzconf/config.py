@@ -21,6 +21,13 @@ PROVIDERS = {
     "raiffeisen_lan1": "KONVERTO WAN (über LAN 1 / externes Modem)",
 }
 
+# KONVERTO-Profile heißen je Modell/FRITZ!OS unterschiedlich (z.B. 5530 mit 7.81: 'raiffeisen' auf der
+# Glasfaser-Seite statt 'raiffeisen_fiber') -> Profil über diese Stichwörter finden
+PROVIDER_KEYWORDS = ("raiffeisen", "konverto")
+# Dummy-Zugangsdaten der KONVERTO-Profile - sollen auf allen Boxen gleich sein
+DEFAULT_PPP_USER = "nome@xdsl.rol"
+DEFAULT_PPP_PASSWORD = "pass22xdsl"
+
 # Info-LED (box:settings/infoled_reason) - Texte wie in System > Tasten und LEDs > LED-Anzeigen (FRITZ!OS 8.50)
 INFOLED_REASONS = {
     "1": "Freies Onlinevolumen / freie Onlinezeit aufgebraucht – LED blinkt",

@@ -16,7 +16,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from . import netutil
 from .boxinfo import BoxInfo, compare_versions, detect, read_boxinfo
-from .config import INFOLED_REASONS, JobConfig, firmware_dir, logs_dir
+from .config import (DEFAULT_PPP_PASSWORD, DEFAULT_PPP_USER, INFOLED_REASONS, PROVIDER_KEYWORDS, JobConfig,
+                     firmware_dir, logs_dir)
 from .firmware import FirmwareRepo, ImageInfo, SingleFileServer, inspect_image, parse_firmwarecfg_response
 from .httpclient import HttpClient, HttpError
 from .netutil import Cancelled
@@ -85,6 +86,36 @@ def parse_characteristic(s: str) -> Dict[str, str]:
             if k:
                 res[k.strip()] = v.strip()
     return res
+
+
+def pick_provider(plist: List[dict], pid: str, kind: str) -> Optional[dict]:
+    """Gewünschtes Profil, sonst das passendste Raiffeisen/KONVERTO-Profil für die Anschlussart.
+
+    Die IDs unterscheiden sich je Modell/FRITZ!OS (5690 mit 8.x: 'raiffeisen_fiber',
+    5530 mit 7.81: 'raiffeisen' auf der Glasfaser-Seite).
+    """
+    exact = next((e for e in plist if str(e.get("Id")) == pid), None)
+    if exact is not None:
+        return exact
+
+    def text(e: dict) -> str:
+        return f"{e.get('Id', '')} {e.get('providername', '')} {e.get('displayId', '')}".lower()
+
+    cands = [e for e in plist if any(k in text(e) for k in PROVIDER_KEYWORDS)]
+    if not cands:
+        return None
+
+    def score(e: dict) -> int:
+        eid, medium = str(e.get("Id", "")).lower(), str(e.get("medium") or "").upper()
+        is_fiber = "fiber" in eid or "FIBER" in medium
+        is_ata = "lan" in eid or "ATA" in medium or "wan" in str(e.get("providername", "")).lower()
+        if kind == "fiber":
+            return 2 * is_fiber - is_ata
+        if kind == "ata":
+            return 2 * is_ata - is_fiber
+        return 2 * (not is_fiber and not is_ata) + ("DSL" in medium)
+
+    return max(cands, key=score)  # bei Gleichstand: erstes in der Liste der Box
 
 
 def ip_fields(prefix: str, ip: str) -> List[Tuple[str, str]]:
@@ -353,12 +384,17 @@ class Runner:
             pid = AUTO_PROVIDER[kind]
         self.log("info", f"{KIND_LABEL[kind]}-Modell erkannt - Anbieterprofil '{pid}' (Seite '{page}')")
         plist = self._provider_list()
-        entry = next((e for e in plist if str(e.get("Id")) == pid), None)
+        entry = pick_provider(plist, pid, kind)
         if entry is None and self.cfg.dry_run:
             raise StepSkipped(f"Testmodus - Anbieter '{pid}' erscheint erst nach der Ländereinstellung")
         if entry is None:
-            names =", ".join(sorted({str(e.get('Id')) for e in plist})[:60])
-            raise StepFailed(f"Anbieter '{pid}' nicht in der Anbieterliste der Box - Land richtig gesetzt? (verfügbar: {names})")
+            names = ", ".join(sorted({str(e.get('Id')) for e in plist})[:60])
+            raise StepFailed(f"Kein Raiffeisen/KONVERTO-Profil in der Anbieterliste der Box - Land richtig gesetzt? "
+                             f"(verfügbar: {names})")
+        if str(entry.get("Id")) != pid:
+            self.log("warn", f"Profil '{pid}' gibt es auf dieser Box nicht - verwende '{entry.get('Id')}' "
+                             f"({entry.get('providername') or '?'})")
+            pid = str(entry.get("Id"))
         ch = self._characteristic(entry)
         self.log("info", f"Profil '{entry.get('providername') or pid}': Opmode {ch.get('connections:opmode', '?')}, "
                          f"Standard-Benutzer {ch.get('connections:connection0/username', '?')}")
@@ -383,18 +419,19 @@ class Runner:
                 raise StepFailed("Eigene Zugangsdaten gewählt, aber kein Benutzername angegeben")
             fields += [(f"user:{pid}", self.cfg.ppp_user), (f"pwd:{pid}", self.cfg.ppp_password)]
             self.log("info", f"Verwende eigene Zugangsdaten (Benutzer {self.cfg.ppp_user})")
-        elif is_fiber:
-            # fiberSet übernimmt die Profil-Vorgabe nicht selbst ("notfound, user:<pid>") -> explizit senden
-            user = ch.get("connections:connection0/username", "")
-            pwd = ch.get("connections:connection0/password", "")
-            if not user:
-                raise StepFailed(f"Profil '{pid}' liefert keinen Standard-Benutzer - bitte eigene Zugangsdaten angeben")
-            fields.append((f"user:{pid}", user))
-            if pwd:
-                fields.append((f"pwd:{pid}", pwd))
-            self.log("info", f"Zugangsdaten: Vorgabe des Anbieterprofils (Dummy-Daten, Benutzer {user}) - explizit gesendet")
         else:
-            self.log("info", "Zugangsdaten: Vorgabe des Anbieterprofils (Dummy-Daten)")
+            # Dummy-Zugangsdaten sind auf allen Boxen gleich (nome@xdsl.rol / pass22xdsl)
+            prof_user = ch.get("connections:connection0/username", "")
+            prof_pwd = ch.get("connections:connection0/password", "")
+            matches = prof_user == DEFAULT_PPP_USER and prof_pwd in ("", DEFAULT_PPP_PASSWORD)
+            if is_fiber or not matches:
+                # fiberSet übernimmt die Profil-Vorgabe nicht selbst ("notfound, user:<pid>"); abweichende
+                # oder fehlende Profil-Vorgabe -> Standard-Dummy-Daten explizit senden
+                fields += [(f"user:{pid}", DEFAULT_PPP_USER), (f"pwd:{pid}", DEFAULT_PPP_PASSWORD)]
+                extra = "" if matches else f" (Profil-Vorgabe war '{prof_user or 'leer'}')"
+                self.log("info", f"Zugangsdaten: Dummy-Daten {DEFAULT_PPP_USER} explizit gesendet{extra}")
+            else:
+                self.log("info", f"Zugangsdaten: Vorgabe des Anbieterprofils (Dummy-Daten {DEFAULT_PPP_USER})")
         if self.cfg.dry_run:
             self.log("info", "Testmodus - würde senden: " + ", ".join(f"{k}={v}" for k, v in fields if not k.startswith("pwd")))
             raise StepSkipped("Testmodus - keine Änderung")
@@ -419,7 +456,7 @@ class Runner:
         self.log("info", f"Prüfung: Anbieter '{prov}', Benutzer '{user}', Betriebsart '{v.get('opmode')}', ACS '{v.get('acs')}'")
         if prov and prov != pid:
             raise StepFailed(f"Box meldet Anbieter '{prov}' statt '{pid}'")
-        want_user = self.cfg.ppp_user if self.cfg.custom_credentials else ch.get("connections:connection0/username", "")
+        want_user = self.cfg.ppp_user if self.cfg.custom_credentials else DEFAULT_PPP_USER
         if want_user and user and user != want_user:
             raise StepWarning(f"Anbieter gesetzt, aber Benutzername ist '{user}' (erwartet '{want_user}')")
         return f"{entry.get('providername') or pid} eingerichtet (Benutzer {user or want_user})"

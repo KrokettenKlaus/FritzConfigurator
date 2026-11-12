@@ -52,7 +52,7 @@ class MockBox:
     def __init__(self, ip: str = "127.0.0.1", dsl: bool = True, hw: str = "256", version: str = "256.07.57",
                  require_2fa: bool = False, require_confirm: bool = False, tr064_port: int = 49000,
                  reboot_seconds: float = 3.0, web_locale_broken: bool = False, reject_web_upload: bool = False, name: str = "FRITZ!Box 7530 AX",
-                 fiber: bool = False, rest_api: bool = True):
+                 fiber: bool = False, rest_api: bool = True, legacy_fiber_ids: bool = False):
         self.lock = threading.RLock()
         self.ip = ip
         self.dsl = dsl and not fiber
@@ -67,6 +67,7 @@ class MockBox:
         self.reject_web_upload = reject_web_upload
         self.reboot_seconds = reboot_seconds
         self.rest_api = rest_api
+        self.legacy_fiber_ids = legacy_fiber_ids  # wie 5530 Fiber mit FRITZ!OS 7.81
         self.rest_calls: List[tuple] = []
         self.down_until = 0.0
         self.sids: Dict[str, float] = {}
@@ -143,6 +144,12 @@ class MockBox:
                 {"id": "043", "name": "Österreich", "_node": "country2"}]
 
     def provider_list(self):
+        if self.vars["country:settings/current_country"] == "039" and self.legacy_fiber_ids:
+            # Anbieterliste einer 5530 Fiber mit FRITZ!OS 7.81 (Glasfaser-Seite), KONVERTO heißt hier 'raiffeisen'
+            ids = ["bruneck_fiber", "conv_fiber", "isiline_fiber", "ofppp_fiber", "other_fiber", "raiffeisen",
+                   "telweb_fiber", "tim_fiber"]
+            return [{"Id": i, "providername": "Raiffeisen OnLine" if i == "raiffeisen" else i.split("_")[0].title(),
+                     "displayId": "", "medium": "FIBER", "_node": f"provider{n}"} for n, i in enumerate(ids)]
         if self.vars["country:settings/current_country"] == "039":
             return [{"Id": "tim_vdsl", "providername": "TIM", "displayId": "", "medium": "VDSL", "_node": "provider0"},
                     {"Id": "raiffeisen", "providername": "KONVERTO DSL", "displayId": "", "medium": "", "_node": "provider1"},
@@ -161,6 +168,8 @@ class MockBox:
         if m:
             for p in self.provider_list():
                 if p["_node"] == m.group(1):
+                    if self.legacy_fiber_ids and p["Id"] == "raiffeisen":
+                        return "connections:opmode=opmode_fiber_pppoe;connections:connection0/stay_always_online=1"
                     return CHARACTERISTICS.get(p["Id"], "")
             return ""
         return self.vars.get(name, "")
@@ -364,7 +373,8 @@ class MockBox:
                     return self._json({"data": {"apply": "valerror", "valerror": {
                         "ok": False, "tomark": [f"user:{pid}"], "result": "notfound",
                         "alert": f"Es ist ein Fehler aufgetreten. (notfound, user:{pid})"}}})
-                ch = dict(x.split("=", 1) for x in CHARACTERISTICS.get(pid, "").split(";") if "=" in x)
+                ch = dict(x.split("=", 1) for x in box.query_var(
+                    "providerlist:settings/" + ids[pid]["_node"] + "/characteristic").split(";") if "=" in x)
                 user = vars_.get("user")
                 if user is None:
                     if not ch.get("connections:connection0/username"):

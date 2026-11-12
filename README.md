@@ -6,7 +6,8 @@ Konfiguriert FRITZ!Boxen automatisch vor – genau die Schritte, die sonst von H
 2. **Internetanbieter KONVERTO** – Anbieterprofil wie in der Liste „Internetanbieter“ ausgewählt
    - DSL-Modelle: **KONVERTO DSL** (intern `raiffeisen`)
    - Modelle ohne DSL (z. B. 4060): **KONVERTO WAN** (intern `raiffeisen_lan1`)
-   - Zugangsdaten = Dummy-Daten des Profils (`nome@xdsl.rol` / `pass22xdsl`), optional eigene
+   - Die Profil-ID unterscheidet sich je Modell/FRITZ!OS (z. B. 5530 Fiber mit 7.81: `raiffeisen` statt `raiffeisen_fiber`). Fehlt die gewählte ID, nimmt das Tool automatisch das passende Raiffeisen/KONVERTO-Profil der Box
+   - Zugangsdaten = immer die Dummy-Daten `nome@xdsl.rol` / `pass22xdsl` (werden gesendet, falls das Profil sie nicht selbst vorgibt), optional eigene
 3. **Heimnetz (optional)** – Box-IP (Gateway), Subnetzmaske, DHCP-Pool
 4. **Firmware (optional)** – neueste FRITZ!OS-Version für genau dieses Modell
 5. **Info-LED** – *System › Tasten und LEDs › LED-Anzeigen*: „Internetverbindung besteht – LED leuchtet“

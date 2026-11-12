@@ -14,7 +14,7 @@ from fritzconf import netutil, runner as runner_mod  # noqa: E402
 from fritzconf.boxinfo import version_tuple  # noqa: E402
 from fritzconf.config import JobConfig  # noqa: E402
 from fritzconf.firmware import FirmwareRepo, inspect_image, parse_firmwarecfg_response  # noqa: E402
-from fritzconf.runner import Callbacks, Runner  # noqa: E402
+from fritzconf.runner import Callbacks, Runner, pick_provider  # noqa: E402
 from fritzconf.session import calc_challenge_response  # noqa: E402
 from tests.mockbox import PW, MockBox, make_image  # noqa: E402
 
@@ -154,6 +154,26 @@ class TestFiberBox(Base):
         self.assertTrue(any(p.get("page") == "fiberSet" and "apply" in p for p in self.box.posts))
 
 
+class TestFiber5530Legacy(Base):
+    box_kwargs = {"fiber": True, "hw": "262", "name": "FRITZ!Box 5530 Fiber", "version": "262.07.81",
+                  "legacy_fiber_ids": True}
+
+    def _check(self, provider):
+        res = self.run_job(self.cfg(provider=provider))
+        self.assertTrue(res.ok, self.dump())
+        v = self.box.vars
+        self.assertEqual(v["connections:settings/connection0/providername"], "raiffeisen")
+        self.assertEqual(v["connections:settings/connection0/username"], "nome@xdsl.rol")
+        self.assertEqual(v["connections:settings/connection0/password"], "pass22xdsl")
+        self.assertTrue(any("verwende 'raiffeisen'" in m for _, m in self.logs), self.dump())
+
+    def test_saved_fiber_profile(self):
+        self._check("raiffeisen_fiber")   # in settings.json gespeichert (wie beim Fehler)
+
+    def test_auto_profile(self):
+        self._check("auto")
+
+
 class TestInfoLed(Base):
     def test_infoled_only(self):
         res = self.run_job(self.cfg(set_locale=False, set_provider=False))
@@ -228,7 +248,7 @@ class TestErrors(Base):
     def test_provider_without_country(self):
         res = self.run_job(self.cfg(set_locale=False))
         self.assertFalse(res.ok)
-        self.assertIn("nicht in der Anbieterliste", self.steps["provider"][1])
+        self.assertIn("KONVERTO-Profil in der Anbieterliste", self.steps["provider"][1])
 
     def test_invalid_network(self):
         res = self.run_job(self.cfg(set_locale=False, set_provider=False, set_network=True, lan_ip="127.0.0.1",
@@ -277,6 +297,21 @@ class TestFirmwareTr064(Base):
 
 
 class TestUnits(unittest.TestCase):
+    def test_pick_provider(self):
+        def lst(*ids, medium=""):
+            return [{"Id": i, "providername": i, "medium": medium} for i in ids]
+        pick = lambda l, pid, kind: (pick_provider(l, pid, kind) or {}).get("Id")  # noqa: E731
+        full = lst("tim_vdsl", "raiffeisen", "raiffeisen_lan1", "raiffeisen_fiber", "other")
+        self.assertEqual(pick(full, "raiffeisen_fiber", "fiber"), "raiffeisen_fiber")
+        self.assertEqual(pick(full, "gibtsnicht", "fiber"), "raiffeisen_fiber")
+        self.assertEqual(pick(full, "gibtsnicht", "dsl"), "raiffeisen")
+        self.assertEqual(pick(full, "gibtsnicht", "ata"), "raiffeisen_lan1")
+        legacy = lst("bruneck_fiber", "conv_fiber", "other_fiber", "raiffeisen", "tim_fiber", medium="FIBER")
+        self.assertEqual(pick(legacy, "raiffeisen_fiber", "fiber"), "raiffeisen")
+        self.assertEqual(pick([{"Id": "xy_glas", "providername": "KONVERTO Glasfaser"}], "raiffeisen_fiber", "fiber"),
+                         "xy_glas")
+        self.assertIsNone(pick(lst("tim_fiber", "other_fiber"), "raiffeisen_fiber", "fiber"))
+
     def test_versions(self):
         self.assertEqual(version_tuple("256.08.50"), (8, 50))
         self.assertEqual(version_tuple("07.57"), (7, 57))
