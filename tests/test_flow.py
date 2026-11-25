@@ -332,6 +332,20 @@ class TestFirmwareTr064(Base):
         self.assertTrue(any("TR-064" in m for _, m in self.logs))
 
 
+class TestFirmwareStagedReboot(Base):
+    """Box geht nach dem Upload kurz weg, antwortet mit der alten Version, startet erst dann wirklich neu."""
+    box_kwargs = {"fw_blip": True}
+
+    def test_waits_for_new_version(self):
+        make_image(os.path.join(self.fwdir, "new.image"), "256", "08.50")
+        res = self.run_job(self.cfg(set_locale=False, set_provider=False, update_firmware=True))
+        self.assertTrue(res.ok, self.dump())
+        self.assertEqual(self.steps["firmware"][0], "ok", self.dump())
+        self.assertEqual(res.box_after.fw_display, "8.50")
+        self.assertEqual(self.box.reboots, 2)
+        self.assertEqual(self.steps["infoled"][0], "ok", self.dump())
+
+
 class TestUnits(unittest.TestCase):
     def test_pick_provider(self):
         def lst(*ids, medium=""):

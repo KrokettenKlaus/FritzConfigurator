@@ -52,8 +52,10 @@ class MockBox:
     def __init__(self, ip: str = "127.0.0.1", dsl: bool = True, hw: str = "256", version: str = "256.07.57",
                  require_2fa: bool = False, require_confirm: bool = False, tr064_port: int = 49000,
                  reboot_seconds: float = 3.0, web_locale_broken: bool = False, reject_web_upload: bool = False, name: str = "FRITZ!Box 7530 AX",
-                 fiber: bool = False, rest_api: bool = True, legacy_fiber_ids: bool = False, multiwan: bool = False):
+                 fiber: bool = False, rest_api: bool = True, legacy_fiber_ids: bool = False, multiwan: bool = False,
+                 fw_blip: bool = False):
         self.lock = threading.RLock()
+        self.fw_blip = fw_blip
         self.ip = ip
         self.dsl = dsl and not fiber
         self.fiber = fiber
@@ -472,7 +474,16 @@ class MockBox:
 
                 def apply_fw():
                     box.version = newver
-                box.reboot(delay=1.0, then=apply_fw)
+                if not box.fw_blip:
+                    box.reboot(delay=1.0, then=apply_fw)
+                    return
+
+                def staged():
+                    # wie 5690 Pro 7.62 -> 8.51: kurz weg, wieder da mit ALTER Version, dann echter Neustart
+                    box.reboot(delay=0.5, duration=3.0)
+                    time.sleep(0.5 + 3.0 + 6.0)
+                    box.reboot(delay=0.0, then=apply_fw)
+                threading.Thread(target=staged, daemon=True).start()
 
         return H
 

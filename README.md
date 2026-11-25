@@ -86,7 +86,7 @@ Die Abläufe wurden aus den Original-Quellen von FRITZ!OS 8.50 (7530 AX, 4060) a
 
 Bestätigungsabfragen der Box werden wie ein Klick auf „OK“ beantwortet; die Zwei-Faktor-Bestätigung (Taste/Telefon) wird abgefragt und abgewartet.
 
-`run_tests.bat` startet den Selbsttest gegen eine simulierte FRITZ!Box (33 Tests).
+`run_tests.bat` startet den Selbsttest gegen eine simulierte FRITZ!Box (34 Tests).
 
 Diagnose bei unbekannten Modellen: `py -3 tools\probe_provider_page.py KENNWORT [HOST]` zeigt, welche Seite die Box für *Internet › Zugangsdaten* nutzt (ändert nichts). Ausführliche Anleitung für Anwender: `README.txt`.
 

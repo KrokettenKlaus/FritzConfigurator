@@ -168,5 +168,5 @@ kann also jederzeit gefahrlos erneut gestartet werden.
   run_tests.bat doppelklicken oder:
       py -3 -m unittest tests.test_flow -v
 
-  Testet alle Ablaeufe gegen eine simulierte FRITZ!Box (33 Tests, ca. 3 Minuten).
+  Testet alle Ablaeufe gegen eine simulierte FRITZ!Box (34 Tests, ca. 4 Minuten).
   Port 80 und 49000 auf 127.0.0.x muessen frei sein.

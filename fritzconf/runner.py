@@ -45,6 +45,9 @@ AUTO_PROVIDER = {"dsl": "raiffeisen", "fiber": "raiffeisen_fiber", "ata": "raiff
 KIND_LABEL = {"dsl": "DSL", "fiber": "Glasfaser", "ata": "Nicht-DSL"}
 
 
+RELOGIN_TIMEOUT = 180.0   # s - erneute Anmeldung nach Neustart
+
+
 def multiwan_kind(provider: str) -> str:
     """Zugangsart auf einer Multi-WAN-Box aus dem gewählten Profil ('auto' -> Glasfaser)."""
     p = provider.lower()
@@ -174,13 +177,15 @@ class Runner:
 
     def _relogin(self, host: Optional[str] = None) -> None:
         h = host or self.host
-        for attempt in range(6):
+        # Nach einem Neustart (v.a. Firmware-Update) läuft die Anmeldung teils erst nach 1-2 Minuten
+        deadline = time.monotonic() + RELOGIN_TIMEOUT
+        while True:
             self._check_cancel()
             try:
                 self._connect_session(h)
                 return
             except (HttpError, LoginError) as e:
-                if attempt == 5:
+                if time.monotonic() >= deadline:
                     raise StepFailed(f"Erneute Anmeldung fehlgeschlagen: {e}")
                 netutil.sleep_cancellable(5, self.cancel)
 
@@ -666,7 +671,7 @@ class Runner:
         self.cb.progress("", None)
         if not rebooted:
             raise StepFailed("Box hat das Update nicht gestartet (kein Neustart erkannt)")
-        after = read_boxinfo(HttpClient(self.host, timeout=10))
+        after = self._wait_new_firmware(img, box)
         self.result.box_after = after
         if after.fw_tuple[:2] != img.vtuple:
             raise StepWarning(f"Box meldet nach Neustart FRITZ!OS {after.fw_display}, erwartet {img.display}")
@@ -675,6 +680,45 @@ class Runner:
         except StepFailed:
             pass
         return f"FRITZ!OS {box.fw_display} -> {after.fw_display}"
+
+    def _wait_new_firmware(self, img: ImageInfo, before: BoxInfo) -> BoxInfo:
+        """Wartet nach dem Update, bis die Box mit der neuen Version antwortet.
+
+        Die Box geht beim Installieren oft mehrmals weg (z.B. 5690 Pro 7.62 -> 8.51: Weboberfläche kurz weg,
+        antwortet wieder mit der alten Version, erst dann der eigentliche Neustart). Ein einzelnes
+        'wieder erreichbar' reicht deshalb nicht - Aussetzer bis zum Zeitlimit werden toleriert.
+        """
+        deadline = time.monotonic() + self.fw_timeouts[1]
+        last: Optional[BoxInfo] = None
+        state = ""
+        while True:
+            self._check_cancel()
+            try:
+                info: Optional[BoxInfo] = read_boxinfo(HttpClient(self.host, timeout=10))
+            except HttpError:
+                info = None
+            if info is not None and info.fw_tuple[:2] == img.vtuple:
+                if state:
+                    self.log("ok", f"Box meldet FRITZ!OS {info.fw_display}")
+                # Dienste (Anmeldung, query.lua) brauchen nach dem Start noch etwas
+                netutil.sleep_cancellable(netutil.BOOT_SETTLE_SECONDS, self.cancel)
+                return info
+            if info is not None:
+                last = info
+            new_state = "down" if info is None else "old"
+            if new_state != state:
+                if new_state == "down":
+                    self.log("info", "Box ist offline (Neustart läuft) - warte ...")
+                else:
+                    self.log("info", f"Box antwortet noch mit FRITZ!OS {info.fw_display if info else before.fw_display}"
+                                     " - Installation läuft, warte auf Neustart ...")
+                state = new_state
+            if time.monotonic() >= deadline:
+                if last is not None:
+                    return last   # Aufrufer meldet die abweichende Version
+                raise StepFailed(f"Box ist nach dem Firmware-Update {int(self.fw_timeouts[1])} s lang nicht "
+                                 "wieder erreichbar - bitte Box prüfen (nicht ausschalten, solange die LEDs blinken)")
+            netutil.sleep_cancellable(5, self.cancel)
 
     def _firmware_via_tr064(self, img: ImageInfo) -> None:
         local_ip = netutil.local_ip_towards(self.host)
