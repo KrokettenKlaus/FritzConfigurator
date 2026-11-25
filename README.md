@@ -6,6 +6,7 @@ Konfiguriert FRITZ!Boxen automatisch vor – genau die Schritte, die sonst von H
 2. **Internetanbieter KONVERTO** – Anbieterprofil wie in der Liste „Internetanbieter“ ausgewählt
    - DSL-Modelle: **KONVERTO DSL** (intern `raiffeisen`)
    - Modelle ohne DSL (z. B. 4060): **KONVERTO WAN** (intern `raiffeisen_lan1`)
+   - Glasfaser + DSL (5690 Pro mit FRITZ!OS 7.62): gemeinsame Seite `multiwanSet`; Reiter *Glasfaser* bei „Automatisch“/`raiffeisen_fiber`, Reiter *DSL / WAN* bei `raiffeisen`/`raiffeisen_lan1`
    - Die Profil-ID unterscheidet sich je Modell/FRITZ!OS (z. B. 5530 Fiber mit 7.81: `raiffeisen` statt `raiffeisen_fiber`). Fehlt die gewählte ID, nimmt das Tool automatisch das passende Raiffeisen/KONVERTO-Profil der Box
    - Zugangsdaten = immer die Dummy-Daten `nome@xdsl.rol` / `pass22xdsl` (werden gesendet, falls das Profil sie nicht selbst vorgibt), optional eigene
 3. **Heimnetz (optional)** – Box-IP (Gateway), Subnetzmaske, DHCP-Pool
@@ -78,13 +79,15 @@ Die Abläufe wurden aus den Original-Quellen von FRITZ!OS 8.50 (7530 AX, 4060) a
 |---|---|---|---|
 | Anmeldung | `login_sid.lua?version=2` (PBKDF2), MD5 für ältere FRITZ!OS | – | – |
 | Sprache/Land | `data.lua` page=`basic_first` | TR-064 `X_AVM-DE_SetInternationalConfig` | `query.lua` |
-| Anbieter | `data.lua` page=`cred` (DSL) bzw. `ataSet` | direkter Seitenaufruf | `query.lua` (Anbieter, Benutzer, ACS) |
+| Anbieter | `data.lua` page=`cred` (DSL), `fiberSet`, `ataSet` bzw. `multiwanSet` (5690 Pro) | direkter Seitenaufruf | `query.lua` (Anbieter, Benutzer, ACS) |
 | Heimnetz | `data.lua` page=`boxnet` | direkter Seitenaufruf | `query.lua` |
 | Firmware | `/cgi-bin/firmwarecfg` (sid, UploadFile) | TR-064 `X_AVM-DE_DoManualUpdate` | `jason_boxinfo.xml` |
 | Info-LED | REST `PUT /api/v0/generic/box` `{"infoled_reason": 4}` (wie LED-Anzeigen, FRITZ!OS 8) | `/system/infoled.lua` (`led_change_state_event`) | `query.lua` |
 
 Bestätigungsabfragen der Box werden wie ein Klick auf „OK“ beantwortet; die Zwei-Faktor-Bestätigung (Taste/Telefon) wird abgefragt und abgewartet.
 
-`run_tests.bat` startet den Selbsttest gegen eine simulierte FRITZ!Box (26 Tests).
+`run_tests.bat` startet den Selbsttest gegen eine simulierte FRITZ!Box (33 Tests).
+
+Diagnose bei unbekannten Modellen: `py -3 tools\probe_provider_page.py KENNWORT [HOST]` zeigt, welche Seite die Box für *Internet › Zugangsdaten* nutzt (ändert nichts). Ausführliche Anleitung für Anwender: `README.txt`.
 
 Das Programmsymbol (`FritzConfigurator.ico`) erzeugt `py -3 tools\make_icon.py` neu.

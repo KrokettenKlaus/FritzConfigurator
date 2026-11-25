@@ -52,12 +52,13 @@ class MockBox:
     def __init__(self, ip: str = "127.0.0.1", dsl: bool = True, hw: str = "256", version: str = "256.07.57",
                  require_2fa: bool = False, require_confirm: bool = False, tr064_port: int = 49000,
                  reboot_seconds: float = 3.0, web_locale_broken: bool = False, reject_web_upload: bool = False, name: str = "FRITZ!Box 7530 AX",
-                 fiber: bool = False, rest_api: bool = True, legacy_fiber_ids: bool = False):
+                 fiber: bool = False, rest_api: bool = True, legacy_fiber_ids: bool = False, multiwan: bool = False):
         self.lock = threading.RLock()
         self.ip = ip
         self.dsl = dsl and not fiber
         self.fiber = fiber
-        self.kind = "fiber" if fiber else ("dsl" if dsl else "ata")
+        # multiwan: Glasfaser + DSL auf einer Seite (5690 Pro mit FRITZ!OS 7.62)
+        self.kind = "multiwan" if multiwan else ("fiber" if fiber else ("dsl" if dsl else "ata"))
         self.hw = hw
         self.name = name
         self.version = version
@@ -323,6 +324,16 @@ class MockBox:
                         return self._json({"pid": "overview", "data": {}})
                     if "apply" not in p:
                         return self._send(200, "<html><form name='mainform'>internet settings</form></html>")
+                    return self._cred(p)
+                if page == "multiwanSet":
+                    if box.kind != "multiwan":
+                        return self._json({"pid": "overview", "data": {}})
+                    if "apply" not in p:
+                        return self._send(200, "<html><form name='mainform'>multiwan settings</form></html>")
+                    want_tab = "fiber" if "fiber" in (p.get("provider") or "") else "dsl"
+                    if p.get("multiwan_page") != want_tab:
+                        return self._json({"data": {"apply": "valerror", "valerror": {
+                            "provider": f"nicht im Reiter '{p.get('multiwan_page')}'"}}})
                     return self._cred(p)
                 if page == "boxnet":
                     if "apply" not in p:

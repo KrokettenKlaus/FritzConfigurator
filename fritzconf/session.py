@@ -244,6 +244,16 @@ class FritzSession:
             return False
         return r.status == 200
 
+    def page_answer_pid(self, page: str) -> str:
+        """Diagnose: Seiten-ID, mit der die Box auf eine data.lua-Anfrage antwortet."""
+        try:
+            r = self.data_lua(page)
+        except HttpError as e:
+            return f"Fehler {e}"
+        data = parse_json_body(r.text) if r.text.lstrip().startswith("{") else None
+        pid = data.get("pid") if isinstance(data, dict) else None
+        return str(pid) if pid else f"HTTP {r.status}"
+
     # ------------------------------------------------------- apply-Workflow
     def apply(self, page: Optional[str], fields: Sequence[Tuple[str, str]], direct_path: Optional[str] = None,
               submit_name: str = "apply", max_rounds: int = 4) -> dict:

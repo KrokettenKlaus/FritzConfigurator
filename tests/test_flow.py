@@ -174,6 +174,42 @@ class TestFiber5530Legacy(Base):
         self._check("auto")
 
 
+class TestMultiwan5690Pro(Base):
+    """5690 Pro mit FRITZ!OS 7.62: nur 'multiwanSet', cred/fiberSet/ataSet liefern die Übersicht."""
+    box_kwargs = {"multiwan": True, "hw": "305", "name": "FRITZ!Box 5690 Pro", "version": "305.07.62"}
+
+    def _run(self, provider):
+        res = self.run_job(self.cfg(provider=provider))
+        self.assertTrue(res.ok, self.dump())
+        post = next(p for p in self.box.posts if p.get("page") == "multiwanSet" and "apply" in p)
+        return self.box.vars, post
+
+    def test_fiber_profile(self):
+        v, post = self._run("raiffeisen_fiber")   # wie in settings.json
+        self.assertEqual(post["multiwan_page"], "fiber")
+        self.assertEqual(v["connections:settings/connection0/providername"], "raiffeisen_fiber")
+        self.assertEqual(v["connections:settings/connection0/username"], "nome@xdsl.rol")
+        self.assertEqual(v["connections:settings/connection0/password"], "pass22xdsl")
+        self.assertEqual(self.box.last_cred.get("useprevention"), "on")
+        self.assertNotIn("medium", self.box.last_cred)
+
+    def test_auto_is_fiber(self):
+        _, post = self._run("auto")
+        self.assertEqual(post["provider"], "raiffeisen_fiber")
+        self.assertEqual(post["multiwan_page"], "fiber")
+
+    def test_dsl_profile(self):
+        v, post = self._run("raiffeisen")
+        self.assertEqual(post["multiwan_page"], "dsl")
+        self.assertEqual(self.box.last_cred.get("medium"), "dsl")
+        self.assertEqual(v["connections:settings/connection0/providername"], "raiffeisen")
+
+    def test_wan_profile(self):
+        _, post = self._run("raiffeisen_lan1")
+        self.assertEqual(post["multiwan_page"], "dsl")
+        self.assertNotIn("medium:raiffeisen_lan1", post)
+
+
 class TestInfoLed(Base):
     def test_infoled_only(self):
         res = self.run_job(self.cfg(set_locale=False, set_provider=False))

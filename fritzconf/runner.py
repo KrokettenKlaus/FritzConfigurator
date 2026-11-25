@@ -38,8 +38,19 @@ PAGE_LOCALE = ("basic_first", "/assis/basic_first.lua")
 PAGE_DSL = ("cred", "/internet/internet_settings.lua")
 PAGE_FIBER = ("fiberSet", "/internet/fiber_settings.lua")
 PAGE_ATA = ("ataSet", "/internet/ata_settings.lua")
+# Boxen mit Glasfaser + DSL (5690 Pro mit FRITZ!OS 7.62, box_type 'multiwanFiber'): eine gemeinsame Seite mit
+# den Reitern 'fiber' und 'dsl' (DSL / WAN) statt cred/fiberSet/ataSet
+PAGE_MULTIWAN = ("multiwanSet", "/internet/multiwan_settings.lua")
 AUTO_PROVIDER = {"dsl": "raiffeisen", "fiber": "raiffeisen_fiber", "ata": "raiffeisen_lan1"}
 KIND_LABEL = {"dsl": "DSL", "fiber": "Glasfaser", "ata": "Nicht-DSL"}
+
+
+def multiwan_kind(provider: str) -> str:
+    """Zugangsart auf einer Multi-WAN-Box aus dem gewählten Profil ('auto' -> Glasfaser)."""
+    p = provider.lower()
+    if p == "auto" or "fiber" in p:
+        return "fiber"
+    return "ata" if "lan" in p else "dsl"
 PAGE_NET = ("boxnet", "/net/boxnet.lua")
 # Info-LED: FRITZ!OS 8.x speichert über die REST-API (js3 system/leds), ältere Oberfläche über infoled.lua
 REST_BOX = "generic/box"
@@ -366,23 +377,34 @@ class Runner:
         return parse_characteristic(str(d.get("ch") or ""))
 
     def _detect_provider_page(self) -> Tuple[str, str, str]:
-        """Liefert (data.lua-Seite, direkter Pfad, Art 'dsl'|'fiber'|'ata')."""
+        """Liefert (data.lua-Seite, direkter Pfad, Art 'dsl'|'fiber'|'ata'|'multiwan')."""
         assert self.sess
-        for kind, (page, direct) in (("dsl", PAGE_DSL), ("fiber", PAGE_FIBER), ("ata", PAGE_ATA)):
+        tried = []
+        for kind, (page, direct) in (("dsl", PAGE_DSL), ("fiber", PAGE_FIBER), ("ata", PAGE_ATA),
+                                     ("multiwan", PAGE_MULTIWAN)):
             if self.sess.page_available(page):
                 return page, direct, kind
-        raise StepFailed("Seite 'Internet > Zugangsdaten' nicht gefunden (Modell/FRITZ!OS nicht unterstützt?)")
+            tried.append(f"{page}->{self.sess.page_answer_pid(page) or '?'}")
+        raise StepFailed("Seite 'Internet > Zugangsdaten' nicht gefunden (Modell/FRITZ!OS nicht unterstützt?) "
+                         f"- Antwort der Box: {', '.join(tried)}")
 
     def step_provider(self) -> str:
         assert self.sess
         page, direct, kind = self._detect_provider_page()
+        multiwan = kind == "multiwan"
+        if multiwan:
+            kind = multiwan_kind(self.cfg.provider)
         is_dsl = kind == "dsl"
         is_fiber = kind == "fiber"
         self.is_dsl_box = is_dsl
         pid = self.cfg.provider
         if pid == "auto":
             pid = AUTO_PROVIDER[kind]
-        self.log("info", f"{KIND_LABEL[kind]}-Modell erkannt - Anbieterprofil '{pid}' (Seite '{page}')")
+        if multiwan:
+            self.log("info", f"Multi-WAN-Modell (Glasfaser + DSL) erkannt - Zugang {KIND_LABEL[kind]}, "
+                             f"Anbieterprofil '{pid}' (Seite '{page}')")
+        else:
+            self.log("info", f"{KIND_LABEL[kind]}-Modell erkannt - Anbieterprofil '{pid}' (Seite '{page}')")
         plist = self._provider_list()
         entry = pick_provider(plist, pid, kind)
         if entry is None and self.cfg.dry_run:
@@ -400,6 +422,9 @@ class Runner:
                          f"Standard-Benutzer {ch.get('connections:connection0/username', '?')}")
         medium = str(entry.get("medium") or "").upper()
         fields: List[Tuple[str, str]] = [("provider", pid)]
+        if multiwan:
+            # Reiter der Seite: Glasfaser oder 'DSL / WAN' (dort liegen auch die WAN-Profile)
+            fields.append(("multiwan_page", "fiber" if is_fiber else "dsl"))
         if is_dsl and ("ADSL" in medium or "VDSL" in medium or not medium or "UNDEFINED" in medium) and "ATA" not in medium:
             fields.append((f"medium:{pid}", "dsl"))
         if ch.get("connections:connection0/stay_always_online", "1") == "0":
@@ -408,8 +433,8 @@ class Runner:
                 fields.append((f"idle:{pid}", ch["connections:connection0/inactivity_timeout"]))
         else:
             fields.append((f"connmode:{pid}", "always_online"))
-        # Glasfaser-Seite kennt weder medium- noch useprevention-Feld
-        if not is_fiber and ch.get("connections:connection0/disconnect_prevention_enable", "0") == "1":
+        # Glasfaser-Seite (fiberSet) kennt weder medium- noch useprevention-Feld, der Multi-WAN-Reiter schon
+        if (multiwan or not is_fiber) and ch.get("connections:connection0/disconnect_prevention_enable", "0") == "1":
             fields.append((f"useprevention:{pid}", "on"))
             hour = ch.get("connections:connection0/disconnect_prevention_hour", "")
             if hour.isdigit():
@@ -424,7 +449,7 @@ class Runner:
             prof_user = ch.get("connections:connection0/username", "")
             prof_pwd = ch.get("connections:connection0/password", "")
             matches = prof_user == DEFAULT_PPP_USER and prof_pwd in ("", DEFAULT_PPP_PASSWORD)
-            if is_fiber or not matches:
+            if is_fiber or multiwan or not matches:
                 # fiberSet übernimmt die Profil-Vorgabe nicht selbst ("notfound, user:<pid>"); abweichende
                 # oder fehlende Profil-Vorgabe -> Standard-Dummy-Daten explizit senden
                 fields += [(f"user:{pid}", DEFAULT_PPP_USER), (f"pwd:{pid}", DEFAULT_PPP_PASSWORD)]
